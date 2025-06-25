@@ -177,6 +177,7 @@ elif option == "Selling Price Calculator":
     else:
         pct = st.slider("Enter quantity to sell as % of holding:", min_value=1, max_value=100)
         qty_to_sell = int((pct / 100) * total_qty)
+        st.write(f"Quantity to sell: {qty_to_sell} out of {int(total_qty)} shares")
 
     profit_pct = st.number_input("Enter desired profit % on total shares sold:", min_value=0.0, step=0.1, format="%.2f")
 
