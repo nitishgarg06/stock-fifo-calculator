@@ -1,105 +1,98 @@
 import streamlit as st
 import pandas as pd
 
-def load_and_clean_tradebook(file):
-    # We assume the actual header is at line 12 (index 11)
-    df = pd.read_csv(file, skiprows=14)
-    #st.write(f"Columns detected: {df.columns.tolist()}")
-    #st.write(df.head(3))
+# Example raw URLs of your CSV files in the repo
+csv_urls = [
+    "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr23_to_31Mar24.csv",
+    "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr24_to_31Mar25.csv",
+    "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr25_to_24Jun25.csv",
+]
 
-    # Keep only relevant columns and rename for consistency
-    df = df[['Symbol', 'Trade Date', 'Trade Type', 'Quantity', 'Price']].copy()
-    df.rename(columns={'Symbol':'Stock','Trade Date':'Date'}, inplace=True)
+# --- Load and clean one CSV ---
+def load_and_clean_tradebook(url):
+    # Skip first 14 rows to get header at row 15 (0-indexed 14)
+    df = pd.read_csv(url, skiprows=14)
+    # Rename columns for convenience (use exact header names)
+    df.rename(columns={
+        'Symbol': 'Stock',
+        'Trade Date': 'Date',
+        'Trade Type': 'Trade Type',
+        'Quantity': 'Quantity',
+        'Price': 'Price'
+    }, inplace=True)
+    # Convert types
     df['Date'] = pd.to_datetime(df['Date'])
     df['Quantity'] = pd.to_numeric(df['Quantity'])
     df['Price'] = pd.to_numeric(df['Price'])
-    return df
+    return df[['Stock', 'Date', 'Trade Type', 'Quantity', 'Price']]
 
-
-# Add get_current_holdings here, right after load_and_clean_tradebook
+# --- Get current holdings (net shares) ---
 def get_current_holdings(df):
-    df['Quantity'] = pd.to_numeric(df['Quantity'])
+    # Buy adds shares, sell subtracts shares
     df['SignedQty'] = df.apply(lambda row: row['Quantity'] if row['Trade Type'].lower() == 'buy' else -row['Quantity'], axis=1)
-    
     holdings = df.groupby('Stock')['SignedQty'].sum()
-    holdings = holdings[holdings > 0]  # only stocks with positive holdings
+    holdings = holdings[holdings > 0]  # only positive holdings
     return holdings
 
-def calculate_fifo_cost(transactions_df, sell_qty):
-    buys = transactions_df[(transactions_df['Stock'] == stock) & 
-                           (transactions_df['Trade Type'].str.lower() == 'buy')].sort_values(by='Date')
+# --- FIFO cost calculation for shares to sell ---
+def calculate_fifo_cost(df, stock, sell_qty):
+    buys = df[(df['Stock'] == stock) & (df['Trade Type'].str.lower() == 'buy')].sort_values('Date')
     remaining = sell_qty
     total_cost = 0.0
 
     for _, row in buys.iterrows():
-        available_qty = row['Quantity']
-        price = row['Price']
-
         if remaining <= 0:
             break
-
-        qty_to_use = min(available_qty, remaining)
-        total_cost += qty_to_use * price
-        remaining -= qty_to_use
+        qty_available = row['Quantity']
+        qty_used = min(qty_available, remaining)
+        total_cost += qty_used * row['Price']
+        remaining -= qty_used
 
     if remaining > 0:
-        raise ValueError("Not enough shares to sell the requested quantity.")
+        raise ValueError(f"Not enough shares to sell. You requested {sell_qty}, but only {sell_qty - remaining} available.")
 
     return total_cost
 
-def calculate_selling_price(transactions_df, stock, qty_to_sell, profit_percent):
-    # Filter transactions for the stock
-    stock_trades = transactions_df[transactions_df['Stock'] == stock]
-
-    # Calculate total cost of shares to sell using FIFO
-    total_cost = calculate_fifo_cost(stock_trades, qty_to_sell)
-
-    # Calculate total desired revenue to achieve profit_percent
+# --- Calculate selling price per share for desired profit ---
+def calculate_selling_price(df, stock, qty_to_sell, profit_percent):
+    total_cost = calculate_fifo_cost(df, stock, qty_to_sell)
     desired_revenue = total_cost * (1 + profit_percent / 100)
+    sell_price = desired_revenue / qty_to_sell
+    return sell_price
 
-    # Selling price per share
-    selling_price = desired_revenue / qty_to_sell
+# --- Main Streamlit app ---
+def main():
+    st.title("Stock Selling Price Calculator (FIFO)")
 
-    return selling_price
+    st.info("This app loads your stock transaction CSVs from GitHub and calculates the selling price for a desired profit.")
 
-# Streamlit UI
-st.title("📊 FIFO Stock Selling Price Calculator")
-
-st.markdown("""
-Upload your **tradebook CSV files** (same format as your example).  
-The app will automatically clean and combine them.
-""")
-
-uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
-
-if uploaded_files:
+    # Load data from GitHub CSVs
     try:
-        # Load all files
-        dfs = [load_and_clean_tradebook(f) for f in uploaded_files]
+        dfs = [load_and_clean_tradebook(url) for url in csv_urls]
         combined_df = pd.concat(dfs, ignore_index=True)
-        
-        # Get current holdings and stock list
-        holdings = get_current_holdings(combined_df)
-        available_stocks = holdings.index.tolist()
-
-        if not available_stocks:
-            st.warning("No stocks currently held in portfolio.")
-        else:
-            stock = st.selectbox("Select Stock", available_stocks)
-            
-            # Show inputs only after a stock is selected
-            qty_to_sell = st.number_input("Quantity to sell", min_value=1, max_value=int(holdings[stock]))
-            profit_percent = st.number_input("Desired Profit %", min_value=0.0, format="%.2f")
-            
-            if st.button("Calculate Selling Price"):
-                # Your FIFO calculation and display here
-                try:
-                    sell_price = calculate_selling_price(combined_df, stock, qty_to_sell, profit_percent)
-                    st.success(f"Selling price per share: ₹{sell_price:.2f}")
-                except Exception as e:
-                    st.error(f"Calculation error: {e}")
-
     except Exception as e:
-        st.error(f"Failed to process CSV files: {e}")
-else:
-    st.info("Please upload one or more CSV files to continue.")
+        st.error(f"Error loading CSV files from GitHub: {e}")
+        return
+
+    # Get current holdings
+    holdings = get_current_holdings(combined_df)
+    if holdings.empty:
+        st.warning("No stocks with positive holdings found in the uploaded data.")
+        return
+
+    # Stock selection dropdown
+    stock = st.selectbox("Select stock to sell", holdings.index.tolist())
+
+    max_qty = int(holdings[stock])
+    qty_to_sell = st.number_input("Quantity to sell", min_value=1, max_value=max_qty, value=1)
+    profit_percent = st.number_input("Desired profit percentage (%)", min_value=0.0, value=10.0, format="%.2f")
+
+    if st.button("Calculate Selling Price"):
+        try:
+            price = calculate_selling_price(combined_df, stock, qty_to_sell, profit_percent)
+            st.success(f"Sell {qty_to_sell} shares of {stock} at ₹{price:.2f} per share to achieve {profit_percent}% profit.")
+        except Exception as e:
+            st.error(f"Calculation error: {e}")
+
+if __name__ == "__main__":
+    main()
