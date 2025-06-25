@@ -104,6 +104,7 @@ def display_portfolio(df):
         st.write("You have no current holdings (excluding ignored stocks).")
         return
     st.write("### Current Portfolio Holdings")
+
     data = []
     total_value = 0
     for stock, qty in holdings.items():
@@ -111,10 +112,27 @@ def display_portfolio(df):
         avg_price = calculate_avg_buy_price(lots)
         current_value = qty * avg_price
         total_value += current_value
-        data.append({"Stock": stock, "Quantity": qty, "Avg Buy Price (INR)": round(avg_price, 2), "Value (INR)": round(current_value, 2)})
+        # Add ₹ symbol in price columns as string formatted
+        data.append({
+            "Stock": stock,
+            "Quantity": qty,
+            "Avg Buy Price (INR)": f"₹ {avg_price:,.2f}",
+            "Value (INR)": f"₹ {current_value:,.2f}"
+        })
+
     df_holdings = pd.DataFrame(data)
-    st.dataframe(df_holdings)
-    st.write(f"**Total Portfolio Value (INR): ₹{round(total_value, 2):,}**")
+
+    # Style the dataframe for dark mode and better header visibility
+    styled_df = df_holdings.style.set_table_styles([
+        # Header style: light gray background, black text for contrast
+        {'selector': 'th', 'props': [('background-color', '#e0e0e0'), ('color', '#000000')]},
+        # Body cells: dark background, light text
+        {'selector': 'td', 'props': [('background-color', '#121212'), ('color', '#e0e0e0')]}
+    ])
+
+    st.dataframe(styled_df, height=300)
+
+    st.markdown(f"**Total Portfolio Value (INR): ₹ {total_value:,.2f}**")
 
 # --- STREAMLIT APP ---
 
