@@ -8,11 +8,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Inject custom CSS for dark black background + styling
+# Inject custom CSS for full black theme and styling
 st.markdown("""
 <style>
 body {
-    background-color: #000000;  /* full black */
+    background-color: #000000;
     color: #D0D5DD;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
@@ -72,7 +72,7 @@ th {
     background-color: #1a1f27;
     padding: 1rem 2rem;
     border-radius: 12px;
-    margin-bottom: 1.5rem;
+    margin-bottom: 2rem;
     box-shadow: 0 2px 10px rgb(0 0 0 / 0.4);
 }
 </style>
@@ -152,7 +152,7 @@ def calculate_selling_price(fifo_batches, qty_to_sell, profit_pct):
 
 # ----------- MAIN APP -----------------
 
-# Replace with your actual CSV URLs or paths here
+# Replace these with your actual GitHub raw CSV links
 csv_urls = [
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr23_to_31Mar24.csv",
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr24_to_31Mar25.csv",
@@ -167,42 +167,41 @@ except Exception as e:
 
 current_holdings = get_current_holdings(df)
 
-# Display portfolio and calculator side-by-side using columns
-col1, col2 = st.columns([1, 2])
+# ----------- VIEW PORTFOLIO ----------
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("📊 Active Portfolio")
 
-with col1:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("Active Portfolio")
-    if not current_holdings:
-        st.info("No active holdings in your portfolio.")
-    else:
-        portfolio_data = []
-        for stock, batches in current_holdings.items():
-            total_qty = sum(b['qty'] for b in batches)
-            avg_price = sum(b['qty'] * b['price'] for b in batches) / total_qty
-            portfolio_data.append({
-                "Stock": stock,
-                "Quantity": total_qty,
-                "Avg Buy Price (₹)": round(avg_price, 2)
-            })
-        portfolio_df = pd.DataFrame(portfolio_data)
-        st.table(portfolio_df)
-    st.markdown('</div>', unsafe_allow_html=True)
+if not current_holdings:
+    st.info("You have no active holdings.")
+else:
+    portfolio_data = []
+    for stock, batches in current_holdings.items():
+        total_qty = sum(b['qty'] for b in batches)
+        avg_price = sum(b['qty'] * b['price'] for b in batches) / total_qty
+        portfolio_data.append({
+            "Stock": stock,
+            "Quantity": total_qty,
+            "Avg Buy Price (₹)": round(avg_price, 2)
+        })
+    portfolio_df = pd.DataFrame(portfolio_data)
+    st.table(portfolio_df)
+st.markdown('</div>', unsafe_allow_html=True)
 
-with col2:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("Selling Price Calculator")
-    if not current_holdings:
-        st.info("No stocks available to sell.")
-    else:
-        stock = st.selectbox("Select Stock", list(current_holdings.keys()))
-        max_qty = sum(b['qty'] for b in current_holdings[stock])
-        qty = st.number_input("Quantity to Sell", min_value=1, max_value=max_qty, value=1)
-        profit_pct = st.number_input("Desired Profit %", min_value=0.0, value=10.0, format="%.2f")
-        if st.button("Calculate Selling Price"):
-            try:
-                sp = calculate_selling_price(current_holdings[stock], qty, profit_pct)
-                st.success(f"Sell {qty} shares of {stock} at ₹{sp} per share for {profit_pct}% profit.")
-            except ValueError as e:
-                st.error(str(e))
-    st.markdown('</div>', unsafe_allow_html=True)
+# ----------- CALCULATE SELLING PRICE ----------
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("📈 Selling Price Calculator")
+
+if not current_holdings:
+    st.info("No stocks available to sell.")
+else:
+    stock = st.selectbox("Select Stock", list(current_holdings.keys()))
+    max_qty = sum(b['qty'] for b in current_holdings[stock])
+    qty = st.number_input("Quantity to Sell", min_value=1, max_value=max_qty, value=1)
+    profit_pct = st.number_input("Desired Profit %", min_value=0.0, value=10.0, format="%.2f")
+    if st.button("Calculate Selling Price"):
+        try:
+            sp = calculate_selling_price(current_holdings[stock], qty, profit_pct)
+            st.success(f"Sell {qty} shares of {stock} at ₹{sp} per share for {profit_pct}% profit.")
+        except ValueError as e:
+            st.error(str(e))
+st.markdown('</div>', unsafe_allow_html=True)
