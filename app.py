@@ -8,11 +8,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Inject custom CSS for pro dark theme + styling
+# Inject custom CSS for dark black background + styling
 st.markdown("""
 <style>
 body {
-    background-color: #0E1117;
+    background-color: #000000;  /* full black */
     color: #D0D5DD;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
@@ -87,9 +87,7 @@ def load_and_clean_csv(urls):
     dfs = []
     for url in urls:
         df = pd.read_csv(url, skiprows=14)
-        # Keep relevant columns only
         df = df[['Symbol', 'Trade Date', 'Trade Type', 'Quantity', 'Price']]
-        # Clean data
         df['Trade Date'] = pd.to_datetime(df['Trade Date'])
         df['Quantity'] = pd.to_numeric(df['Quantity'])
         df['Price'] = pd.to_numeric(df['Price'])
@@ -107,20 +105,16 @@ def get_current_holdings(df):
             holdings[symbol] = []
         holdings[symbol].append({'qty': qty, 'price': price, 'date': row['Trade Date']})
 
-    # Now calculate net holdings per symbol using FIFO (simulate batches)
     current_holdings = {}
     for symbol, transactions in holdings.items():
         net_qty = sum(t['qty'] for t in transactions)
         if net_qty <= 0:
-            continue  # no holdings or sold out
-
-        # Build FIFO queue for remaining shares
+            continue
         fifo = []
         for t in transactions:
             if t['qty'] > 0:
                 fifo.append({'qty': t['qty'], 'price': t['price'], 'date': t['date']})
             else:
-                # Remove qty from fifo in FIFO order
                 qty_to_remove = -t['qty']
                 while qty_to_remove > 0 and fifo:
                     batch = fifo[0]
@@ -130,7 +124,6 @@ def get_current_holdings(df):
                     else:
                         qty_to_remove -= batch['qty']
                         fifo.pop(0)
-        # Store remaining fifo batches as current holding
         current_holdings[symbol] = fifo
     return current_holdings
 
@@ -151,20 +144,19 @@ def calculate_selling_price(fifo_batches, qty_to_sell, profit_pct):
     if qty_counted < qty_to_sell:
         raise ValueError("Not enough shares to sell that quantity.")
 
-    # Calculate selling price per share to achieve desired profit %
     total_cost = cost_price_total
     desired_total_sale = total_cost * (1 + profit_pct / 100)
     selling_price = desired_total_sale / qty_to_sell
 
     return round(selling_price, 2)
 
-# ------------- APP LOGIC -------------------
+# ----------- MAIN APP -----------------
 
-# Your CSV URLs here (from GitHub raw URLs or elsewhere)
+# Replace with your actual CSV URLs or paths here
 csv_urls = [
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr23_to_31Mar24.csv",
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr24_to_31Mar25.csv",
-    "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr25_to_24Jun25.csv",
+    "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr25_to_24Jun25.csv"
 ]
 
 try:
@@ -174,16 +166,15 @@ except Exception as e:
     st.stop()
 
 current_holdings = get_current_holdings(df)
-available_stocks = list(current_holdings.keys())
 
-# Use radio buttons on main page (mobile friendly)
-option = st.radio("Choose an option:", ("View Portfolio", "Calculate Selling Price"))
+# Display portfolio and calculator side-by-side using columns
+col1, col2 = st.columns([1, 2])
 
-# --------- VIEW PORTFOLIO ----------
-if option == "View Portfolio":
-    st.subheader("Your Active Portfolio")
-    if not available_stocks:
-        st.info("You have no active holdings.")
+with col1:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("Active Portfolio")
+    if not current_holdings:
+        st.info("No active holdings in your portfolio.")
     else:
         portfolio_data = []
         for stock, batches in current_holdings.items():
@@ -196,23 +187,22 @@ if option == "View Portfolio":
             })
         portfolio_df = pd.DataFrame(portfolio_data)
         st.table(portfolio_df)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# -------- CALCULATE SELLING PRICE --------
-else:
+with col2:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Selling Price Calculator")
-
-    if not available_stocks:
+    if not current_holdings:
         st.info("No stocks available to sell.")
-        st.stop()
-
-    stock = st.selectbox("Select Stock to Sell", available_stocks)
-    max_qty = sum(b['qty'] for b in current_holdings[stock])
-    qty = st.number_input("Quantity to Sell", min_value=1, max_value=max_qty, value=1)
-    profit_pct = st.number_input("Desired Profit %", min_value=0.0, value=10.0, format="%.2f")
-
-    if st.button("Calculate Selling Price"):
-        try:
-            selling_price = calculate_selling_price(current_holdings[stock], qty, profit_pct)
-            st.success(f"Sell {qty} shares of {stock} at ₹{selling_price} per share to achieve {profit_pct}% profit.")
-        except ValueError as ve:
-            st.error(str(ve))
+    else:
+        stock = st.selectbox("Select Stock", list(current_holdings.keys()))
+        max_qty = sum(b['qty'] for b in current_holdings[stock])
+        qty = st.number_input("Quantity to Sell", min_value=1, max_value=max_qty, value=1)
+        profit_pct = st.number_input("Desired Profit %", min_value=0.0, value=10.0, format="%.2f")
+        if st.button("Calculate Selling Price"):
+            try:
+                sp = calculate_selling_price(current_holdings[stock], qty, profit_pct)
+                st.success(f"Sell {qty} shares of {stock} at ₹{sp} per share for {profit_pct}% profit.")
+            except ValueError as e:
+                st.error(str(e))
+    st.markdown('</div>', unsafe_allow_html=True)
