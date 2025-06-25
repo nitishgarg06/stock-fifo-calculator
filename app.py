@@ -9,20 +9,21 @@ def load_and_clean_tradebook(file):
 
     # Keep only relevant columns and rename for consistency
     df = df[['Symbol', 'Trade Date', 'Trade Type', 'Quantity', 'Price']].copy()
-    df.rename(columns={
-        'Symbol': 'Stock',
-        'Trade Date': 'Date',
-    }, inplace=True)
-
-    # Filter only buy trades
-    df = df[df['Trade Type'].str.lower() == 'buy']
-
-    # Convert data types
+    df.rename(columns={'Symbol':'Stock','Trade Date':'Date'}, inplace=True)
     df['Date'] = pd.to_datetime(df['Date'])
     df['Quantity'] = pd.to_numeric(df['Quantity'])
     df['Price'] = pd.to_numeric(df['Price'])
+    return df
 
-    return df[['Date', 'Stock', 'Quantity', 'Price']]
+
+# Add get_current_holdings here, right after load_and_clean_tradebook
+def get_current_holdings(df):
+    df['Quantity'] = pd.to_numeric(df['Quantity'])
+    df['SignedQty'] = df.apply(lambda row: row['Quantity'] if row['Trade Type'].lower() == 'buy' else -row['Quantity'], axis=1)
+    
+    holdings = df.groupby('Stock')['SignedQty'].sum()
+    holdings = holdings[holdings > 0]  # only stocks with positive holdings
+    return holdings
 
 def calculate_fifo_cost(transactions_df, sell_qty):
     transactions_df = transactions_df.sort_values(by='Date')  # FIFO
@@ -76,24 +77,19 @@ uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multipl
 
 if uploaded_files:
     try:
-        dfs = [load_and_clean_tradebook(file) for file in uploaded_files]
+        dfs = [load_and_clean_tradebook(f) for f in uploaded_files]
         combined_df = pd.concat(dfs, ignore_index=True)
-        st.success("✅ Files loaded!")
-
-        stock_list = combined_df['Stock'].unique().tolist()
-        stock = st.selectbox("Select Stock", stock_list)
-
-        sell_qty = st.number_input("Quantity to Sell", min_value=1)
-        profit_pct = st.number_input("Desired Profit (%)", min_value=0.0, step=0.1)
-
-        if st.button("Calculate Selling Price"):
-            try:
-                price = get_selling_price(combined_df, stock, sell_qty, profit_pct)
-                st.success(f"💰 Selling Price per Share: **${price}**")
-            except Exception as e:
-                st.error(f"Error: {e}")
+        
+        holdings = get_current_holdings(combined_df)
+        available_stocks = holdings.index.tolist()
+        
+        if not available_stocks:
+            st.warning("No stocks with positive holdings found in your portfolio.")
+        else:
+            stock = st.selectbox("Select Stock", available_stocks)
+            # Proceed with your calculations using 'stock'
 
     except Exception as e:
         st.error(f"Failed to process CSV files: {e}")
 else:
-    st.info("Upload your tradebook CSV files to get started.")
+    st.info("Please upload one or more CSV files to continue.")
