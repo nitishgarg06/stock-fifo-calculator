@@ -82,7 +82,8 @@ def main():
         return
 
     # Menu choice
-    option = st.sidebar.radio("Choose an option:", ("View Portfolio", "Calculate Selling Price"))
+    option = st.radio("Choose an option:", ("View Portfolio", "Calculate Selling Price"))
+
 
     if option == "View Portfolio":
         latest_date = combined_df['Date'].max()
