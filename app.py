@@ -26,7 +26,8 @@ def get_current_holdings(df):
     return holdings
 
 def calculate_fifo_cost(transactions_df, sell_qty):
-    buys = transactions_df[transactions_df['Trade Type'].str.lower() == 'buy'].sort_values(by='Date')
+    buys = transactions_df[(transactions_df['Stock'] == stock) & 
+                           (transactions_df['Trade Type'].str.lower() == 'buy')].sort_values(by='Date')
     remaining = sell_qty
     total_cost = 0.0
 
@@ -37,33 +38,29 @@ def calculate_fifo_cost(transactions_df, sell_qty):
         if remaining <= 0:
             break
 
-        if available_qty <= remaining:
-            total_cost += available_qty * price
-            remaining -= available_qty
-        else:
-            total_cost += remaining * price
-            remaining = 0
+        qty_to_use = min(available_qty, remaining)
+        total_cost += qty_to_use * price
+        remaining -= qty_to_use
 
     if remaining > 0:
         raise ValueError("Not enough shares to sell the requested quantity.")
 
     return total_cost
 
-def get_selling_price(df, stock_name, sell_qty, profit_pct):
-    df_stock = df[df['Stock'].str.upper() == stock_name.upper()]
-    if df_stock.empty:
-        raise ValueError(f"No buy transactions found for stock: {stock_name}")
+def calculate_selling_price(transactions_df, stock, qty_to_sell, profit_percent):
+    # Filter transactions for the stock
+    stock_trades = transactions_df[transactions_df['Stock'] == stock]
 
-    total_available = df_stock['Quantity'].sum()
-    if sell_qty > total_available:
-        raise ValueError(f"Trying to sell {sell_qty} shares but only {total_available} available.")
+    # Calculate total cost of shares to sell using FIFO
+    total_cost = calculate_fifo_cost(stock_trades, qty_to_sell)
 
-    total_cost = calculate_fifo_cost(df_stock, sell_qty)
-    desired_profit = total_cost * (profit_pct / 100)
-    total_sale_value = total_cost + desired_profit
-    selling_price_per_share = total_sale_value / sell_qty
+    # Calculate total desired revenue to achieve profit_percent
+    desired_revenue = total_cost * (1 + profit_percent / 100)
 
-    return round(selling_price_per_share, 2)
+    # Selling price per share
+    selling_price = desired_revenue / qty_to_sell
+
+    return selling_price
 
 # Streamlit UI
 st.title("📊 FIFO Stock Selling Price Calculator")
