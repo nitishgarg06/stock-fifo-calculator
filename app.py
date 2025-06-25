@@ -4,8 +4,8 @@ import pandas as pd
 def load_and_clean_tradebook(file):
     # We assume the actual header is at line 12 (index 11)
     df = pd.read_csv(file, skiprows=14)
-    st.write(f"Columns detected: {df.columns.tolist()}")
-    st.write(df.head(3))
+    #st.write(f"Columns detected: {df.columns.tolist()}")
+    #st.write(df.head(3))
 
     # Keep only relevant columns and rename for consistency
     df = df[['Symbol', 'Trade Date', 'Trade Type', 'Quantity', 'Price']].copy()
