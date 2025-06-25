@@ -26,11 +26,11 @@ def get_current_holdings(df):
     return holdings
 
 def calculate_fifo_cost(transactions_df, sell_qty):
-    transactions_df = transactions_df.sort_values(by='Date')  # FIFO
+    buys = transactions_df[transactions_df['Trade Type'].str.lower() == 'buy'].sort_values(by='Date')
     remaining = sell_qty
     total_cost = 0.0
 
-    for _, row in transactions_df.iterrows():
+    for _, row in buys.iterrows():
         available_qty = row['Quantity']
         price = row['Price']
 
