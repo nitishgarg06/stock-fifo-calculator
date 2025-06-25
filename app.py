@@ -20,11 +20,6 @@ h1, h2, h3 {
     color: #0F9D58;
     font-weight: 700;
 }
-.css-1d391kg {
-    background-color: #12191E;
-    padding: 1rem 1.5rem;
-    border-radius: 8px;
-}
 main .block-container {
     padding-top: 1rem;
     padding-left: 2rem;
@@ -36,7 +31,6 @@ main .block-container {
     border-radius: 5px;
     padding: 8px 24px;
     font-weight: 600;
-    transition: background-color 0.3s ease;
 }
 .stButton>button:hover {
     background-color: #0b7a44;
@@ -82,6 +76,16 @@ st.markdown("### 📈 Pro Broker Stock App")
 
 # ---------- HELPER FUNCTIONS -------------
 
+EXCLUDED_STOCKS = [
+    'UNITDSPR', 'RTNPOWER', 'RTNPOWER-BE',
+    'SHAKTIPUMP-BE', 'SHAKTIPUMP',
+    'SWSOLAR-BE', 'SWSOLAR-T'
+]
+
+SYMBOL_RENAMES = {
+    'JIOFIN-BE': 'JIOFIN'
+}
+
 @st.cache_data
 def load_and_clean_csv(urls):
     dfs = []
@@ -91,13 +95,21 @@ def load_and_clean_csv(urls):
         df['Trade Date'] = pd.to_datetime(df['Trade Date'])
         df['Quantity'] = pd.to_numeric(df['Quantity'])
         df['Price'] = pd.to_numeric(df['Price'])
+
+        # Apply symbol renaming
+        df['Symbol'] = df['Symbol'].replace(SYMBOL_RENAMES)
+
+        # Filter out excluded stocks
+        df = df[~df['Symbol'].isin(EXCLUDED_STOCKS)]
+
         dfs.append(df)
+
     combined_df = pd.concat(dfs, ignore_index=True)
     return combined_df.sort_values('Trade Date')
 
 def get_current_holdings(df):
     holdings = {}
-    for idx, row in df.iterrows():
+    for _, row in df.iterrows():
         symbol = row['Symbol']
         qty = row['Quantity'] if row['Trade Type'].lower() == 'buy' else -row['Quantity']
         price = row['Price']
@@ -152,7 +164,7 @@ def calculate_selling_price(fifo_batches, qty_to_sell, profit_pct):
 
 # ----------- MAIN APP -----------------
 
-# Replace these with your actual GitHub raw CSV links
+# 🔁 Replace with your actual GitHub raw CSV links
 csv_urls = [
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr23_to_31Mar24.csv",
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr24_to_31Mar25.csv",
@@ -167,41 +179,56 @@ except Exception as e:
 
 current_holdings = get_current_holdings(df)
 
-# ----------- VIEW PORTFOLIO ----------
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("📊 Active Portfolio")
+# --------- RADIO MENU TO CHOOSE VIEW ---------
+view_choice = st.radio("Choose View", ["📊 Portfolio", "📈 Selling Price Calculator"])
 
-if not current_holdings:
-    st.info("You have no active holdings.")
-else:
-    portfolio_data = []
-    for stock, batches in current_holdings.items():
-        total_qty = sum(b['qty'] for b in batches)
-        avg_price = sum(b['qty'] * b['price'] for b in batches) / total_qty
-        portfolio_data.append({
-            "Stock": stock,
-            "Quantity": total_qty,
-            "Avg Buy Price (₹)": round(avg_price, 2)
-        })
-    portfolio_df = pd.DataFrame(portfolio_data)
-    st.table(portfolio_df)
-st.markdown('</div>', unsafe_allow_html=True)
+# --------- PORTFOLIO VIEW ---------
+if view_choice == "📊 Portfolio":
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("📊 Active Portfolio")
 
-# ----------- CALCULATE SELLING PRICE ----------
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("📈 Selling Price Calculator")
+    if not current_holdings:
+        st.info("You have no active holdings.")
+    else:
+        portfolio_data = []
+        for stock, batches in current_holdings.items():
+            total_qty = sum(b['qty'] for b in batches)
+            avg_price = sum(b['qty'] * b['price'] for b in batches) / total_qty
+            portfolio_data.append({
+                "Stock": stock,
+                "Quantity": total_qty,
+                "Avg Buy Price (₹)": round(avg_price, 2)
+            })
+        portfolio_df = pd.DataFrame(portfolio_data)
+        st.table(portfolio_df)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-if not current_holdings:
-    st.info("No stocks available to sell.")
-else:
-    stock = st.selectbox("Select Stock", list(current_holdings.keys()))
-    max_qty = sum(b['qty'] for b in current_holdings[stock])
-    qty = st.number_input("Quantity to Sell", min_value=1, max_value=max_qty, value=1)
-    profit_pct = st.number_input("Desired Profit %", min_value=0.0, value=10.0, format="%.2f")
-    if st.button("Calculate Selling Price"):
-        try:
-            sp = calculate_selling_price(current_holdings[stock], qty, profit_pct)
-            st.success(f"Sell {qty} shares of {stock} at ₹{sp} per share for {profit_pct}% profit.")
-        except ValueError as e:
-            st.error(str(e))
-st.markdown('</div>', unsafe_allow_html=True)
+# --------- CALCULATOR VIEW ---------
+elif view_choice == "📈 Selling Price Calculator":
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("📈 Selling Price Calculator")
+
+    if not current_holdings:
+        st.info("No stocks available to sell.")
+    else:
+        stock = st.selectbox("Select Stock", list(current_holdings.keys()))
+        max_qty = sum(b['qty'] for b in current_holdings[stock])
+
+        qty_input_mode = st.radio("Select Quantity Input Mode", ["Units", "Percentage"])
+
+        if qty_input_mode == "Units":
+            qty = st.number_input("Quantity to Sell (Units)", min_value=1, max_value=max_qty, value=1)
+        else:
+            percent = st.slider("Quantity to Sell (%)", min_value=1, max_value=100, value=50)
+            qty = int(max_qty * percent / 100)
+            st.markdown(f"📦 You are selling **{qty} shares** out of {max_qty}")
+
+        profit_pct = st.number_input("Desired Profit %", min_value=0.0, value=10.0, format="%.2f")
+
+        if st.button("Calculate Selling Price"):
+            try:
+                sp = calculate_selling_price(current_holdings[stock], qty, profit_pct)
+                st.success(f"✅ Sell {qty} shares of {stock} at **₹{sp}** per share for {profit_pct}% profit.")
+            except ValueError as e:
+                st.error(str(e))
+    st.markdown('</div>', unsafe_allow_html=True)
