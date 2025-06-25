@@ -1,234 +1,171 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 
-# --------- PAGE CONFIG & THEME -----------
-st.set_page_config(
-    page_title="Pro Broker Stock App",
-    layout="wide",
-    initial_sidebar_state="collapsed",
-)
-
-# Inject custom CSS for full black theme and styling
-st.markdown("""
-<style>
-body {
-    background-color: #000000;
-    color: #D0D5DD;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
-h1, h2, h3 {
-    color: #0F9D58;
-    font-weight: 700;
-}
-main .block-container {
-    padding-top: 1rem;
-    padding-left: 2rem;
-    padding-right: 2rem;
-}
-.stButton>button {
-    background-color: #0F9D58;
-    color: white;
-    border-radius: 5px;
-    padding: 8px 24px;
-    font-weight: 600;
-}
-.stButton>button:hover {
-    background-color: #0b7a44;
-}
-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 1rem;
-}
-th, td {
-    border-bottom: 1px solid #2e2e2e;
-    padding: 0.75rem 1rem;
-    text-align: left;
-    font-size: 0.9rem;
-}
-th {
-    background-color: #1a1f27;
-    color: #0F9D58;
-}
-.stTextInput>div>input, .stNumberInput>div>input {
-    background-color: #1a1f27;
-    border: none;
-    border-radius: 6px;
-    padding: 8px 12px;
-    color: #D0D5DD;
-    font-weight: 600;
-}
-.stSelectbox>div>div>div>span {
-    color: #D0D5DD;
-    font-weight: 600;
-}
-.card {
-    background-color: #1a1f27;
-    padding: 1rem 2rem;
-    border-radius: 12px;
-    margin-bottom: 2rem;
-    box-shadow: 0 2px 10px rgb(0 0 0 / 0.4);
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("### 📈 Pro Broker Stock App")
-
-# ---------- HELPER FUNCTIONS -------------
-
-EXCLUDED_STOCKS = [
-    'UNITDSPR', 'RTNPOWER', 'RTNPOWER-BE',
-    'SHAKTIPUMP-BE', 'SHAKTIPUMP',
-    'SWSOLAR-BE', 'SWSOLAR-T'
-]
-
-SYMBOL_RENAMES = {
-    'JIOFIN-BE': 'JIOFIN'
-}
-
-@st.cache_data
-def load_and_clean_csv(urls):
-    dfs = []
-    for url in urls:
-        df = pd.read_csv(url, skiprows=14)
-        df = df[['Symbol', 'Trade Date', 'Trade Type', 'Quantity', 'Price']]
-        df['Trade Date'] = pd.to_datetime(df['Trade Date'])
-        df['Quantity'] = pd.to_numeric(df['Quantity'])
-        df['Price'] = pd.to_numeric(df['Price'])
-
-        # Apply symbol renaming
-        df['Symbol'] = df['Symbol'].replace(SYMBOL_RENAMES)
-
-        # Filter out excluded stocks
-        df = df[~df['Symbol'].isin(EXCLUDED_STOCKS)]
-
-        dfs.append(df)
-
-    combined_df = pd.concat(dfs, ignore_index=True)
-    return combined_df.sort_values('Trade Date')
-
-def get_current_holdings(df):
-    holdings = {}
-    for _, row in df.iterrows():
-        symbol = row['Symbol']
-        qty = row['Quantity'] if row['Trade Type'].lower() == 'buy' else -row['Quantity']
-        price = row['Price']
-        if symbol not in holdings:
-            holdings[symbol] = []
-        holdings[symbol].append({'qty': qty, 'price': price, 'date': row['Trade Date']})
-
-    current_holdings = {}
-    for symbol, transactions in holdings.items():
-        net_qty = sum(t['qty'] for t in transactions)
-        if net_qty <= 0:
-            continue
-        fifo = []
-        for t in transactions:
-            if t['qty'] > 0:
-                fifo.append({'qty': t['qty'], 'price': t['price'], 'date': t['date']})
-            else:
-                qty_to_remove = -t['qty']
-                while qty_to_remove > 0 and fifo:
-                    batch = fifo[0]
-                    if batch['qty'] > qty_to_remove:
-                        batch['qty'] -= qty_to_remove
-                        qty_to_remove = 0
-                    else:
-                        qty_to_remove -= batch['qty']
-                        fifo.pop(0)
-        current_holdings[symbol] = fifo
-    return current_holdings
-
-def calculate_selling_price(fifo_batches, qty_to_sell, profit_pct):
-    qty_needed = qty_to_sell
-    cost_price_total = 0
-    qty_counted = 0
-
-    for batch in fifo_batches:
-        batch_qty = batch['qty']
-        if qty_needed <= 0:
-            break
-        qty_from_batch = min(batch_qty, qty_needed)
-        cost_price_total += qty_from_batch * batch['price']
-        qty_counted += qty_from_batch
-        qty_needed -= qty_from_batch
-
-    if qty_counted < qty_to_sell:
-        raise ValueError("Not enough shares to sell that quantity.")
-
-    total_cost = cost_price_total
-    desired_total_sale = total_cost * (1 + profit_pct / 100)
-    selling_price = desired_total_sale / qty_to_sell
-
-    return round(selling_price, 2)
-
-# ----------- MAIN APP -----------------
-
-# 🔁 Replace with your actual GitHub raw CSV links
+# --- CONFIG ---
+# Replace these URLs with your GitHub raw CSV URLs
 csv_urls = [
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr23_to_31Mar24.csv",
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr24_to_31Mar25.csv",
     "https://raw.githubusercontent.com/nitishgarg06/stock-fifo-calculator/main/data/tradebook-YYY528-EQ-01Apr25_to_24Jun25.csv"
 ]
 
-try:
-    df = load_and_clean_csv(csv_urls)
-except Exception as e:
-    st.error(f"Error loading data: {e}")
-    st.stop()
+# Stocks to ignore until bought again
+ignored_stocks = {"UNITDSPR", "RTNPOWER", "RTNPOWER-BE", "SHAKTIPUMP-BE", "SHAKTIPUMP", "SWSOLAR-BE", "SWSOLAR-T"}
 
-current_holdings = get_current_holdings(df)
+# Stocks to merge (JIOFIN-BE and JIOFIN as JIOFIN)
+stock_aliases = {"JIOFIN-BE": "JIOFIN"}
 
-# --------- RADIO MENU TO CHOOSE VIEW ---------
-view_choice = st.radio("Choose View", ["📊 Portfolio", "📈 Selling Price Calculator"])
+# --- FUNCTIONS ---
 
-# --------- PORTFOLIO VIEW ---------
-if view_choice == "📊 Portfolio":
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("📊 Active Portfolio")
+def load_and_clean_data():
+    dfs = []
+    for url in csv_urls:
+        df = pd.read_csv(url, skiprows=14)  # header at row 15 (0-indexed 14)
+        dfs.append(df)
+    df = pd.concat(dfs, ignore_index=True)
 
-    if not current_holdings:
-        st.info("You have no active holdings.")
-    else:
-        portfolio_data = []
-        for stock, batches in current_holdings.items():
-            total_qty = sum(b['qty'] for b in batches)
-            avg_price = sum(b['qty'] * b['price'] for b in batches) / total_qty
-            portfolio_data.append({
-                "Stock": stock,
-                "Quantity": total_qty,
-                "Avg Buy Price (₹)": round(avg_price, 2)
-            })
-        portfolio_df = pd.DataFrame(portfolio_data)
-        st.table(portfolio_df)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Rename JIOFIN-BE to JIOFIN
+    df['Symbol'] = df['Symbol'].replace(stock_aliases)
 
-# --------- CALCULATOR VIEW ---------
-elif view_choice == "📈 Selling Price Calculator":
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("📈 Selling Price Calculator")
+    # Filter only buy and sell trades
+    df = df[df['Trade Type'].isin(['buy', 'sell'])]
 
-    if not current_holdings:
-        st.info("No stocks available to sell.")
-    else:
-        stock = st.selectbox("Select Stock", list(current_holdings.keys()))
-        max_qty = sum(b['qty'] for b in current_holdings[stock])
+    # Remove ignored stocks until bought again
+    # We'll determine holdings first, so here just keep for now
 
-        qty_input_mode = st.radio("Select Quantity Input Mode", ["Units", "Percentage"])
+    # Convert Trade Date to datetime
+    df['Trade Date'] = pd.to_datetime(df['Trade Date'])
 
-        if qty_input_mode == "Units":
-            qty = st.number_input("Quantity to Sell (Units)", min_value=1, max_value=max_qty, value=1)
+    # Sort by Trade Date for FIFO
+    df = df.sort_values(['Symbol', 'Trade Date', 'Order Execution Time'])
+
+    return df
+
+def get_current_holdings(df):
+    # Calculate net quantity per stock
+    holdings = {}
+    for symbol, group in df.groupby('Symbol'):
+        net_qty = group.loc[group['Trade Type'] == 'buy', 'Quantity'].sum() - group.loc[group['Trade Type'] == 'sell', 'Quantity'].sum()
+        if net_qty > 0:
+            holdings[symbol] = net_qty
+    # Remove ignored stocks until bought again (only those currently held)
+    holdings = {s: q for s, q in holdings.items() if s not in ignored_stocks}
+    return holdings
+
+def get_fifo_lots(df, stock):
+    """Return list of (qty, price) tuples for remaining shares of stock based on FIFO after sells."""
+    df_stock = df[df['Symbol'] == stock].copy()
+    buys = []
+    sells = []
+    for _, row in df_stock.iterrows():
+        if row['Trade Type'] == 'buy':
+            buys.append([row['Quantity'], row['Price']])
         else:
-            percent = st.slider("Quantity to Sell (%)", min_value=1, max_value=100, value=50)
-            qty = int(max_qty * percent / 100)
-            st.markdown(f"📦 You are selling **{qty} shares** out of {max_qty}")
+            # sell
+            qty_to_sell = row['Quantity']
+            while qty_to_sell > 0 and buys:
+                if buys[0][0] <= qty_to_sell:
+                    qty_to_sell -= buys[0][0]
+                    buys.pop(0)
+                else:
+                    buys[0][0] -= qty_to_sell
+                    qty_to_sell = 0
+    return buys
 
-        profit_pct = st.number_input("Desired Profit %", min_value=0.0, value=10.0, format="%.2f")
+def calculate_avg_buy_price(lots):
+    if not lots:
+        return 0
+    total_qty = sum(q for q, _ in lots)
+    total_cost = sum(q * p for q, p in lots)
+    return total_cost / total_qty if total_qty else 0
 
-        if st.button("Calculate Selling Price"):
-            try:
-                sp = calculate_selling_price(current_holdings[stock], qty, profit_pct)
-                st.success(f"✅ Sell {qty} shares of {stock} at **₹{sp}** per share for {profit_pct}% profit.")
-            except ValueError as e:
-                st.error(str(e))
-    st.markdown('</div>', unsafe_allow_html=True)
+def calculate_selling_price(lots, qty_to_sell, profit_pct):
+    """
+    Given FIFO lots, qty to sell, and desired profit%, return the selling price per share.
+    """
+    remaining_qty = qty_to_sell
+    total_cost = 0
+    for i, (lot_qty, lot_price) in enumerate(lots):
+        if remaining_qty <= 0:
+            break
+        qty_from_lot = min(lot_qty, remaining_qty)
+        total_cost += qty_from_lot * lot_price
+        remaining_qty -= qty_from_lot
+    if remaining_qty > 0:
+        return None  # Not enough shares to sell
+    desired_total = total_cost * (1 + profit_pct / 100)
+    selling_price = desired_total / qty_to_sell
+    return selling_price
+
+def display_portfolio(df):
+    holdings = get_current_holdings(df)
+    if not holdings:
+        st.write("You have no current holdings (excluding ignored stocks).")
+        return
+    st.write("### Current Portfolio Holdings")
+    data = []
+    total_value = 0
+    for stock, qty in holdings.items():
+        lots = get_fifo_lots(df, stock)
+        avg_price = calculate_avg_buy_price(lots)
+        current_value = qty * avg_price
+        total_value += current_value
+        data.append({"Stock": stock, "Quantity": qty, "Avg Buy Price (INR)": round(avg_price, 2), "Value (INR)": round(current_value, 2)})
+    df_holdings = pd.DataFrame(data)
+    st.dataframe(df_holdings)
+    st.write(f"**Total Portfolio Value (INR): ₹{round(total_value, 2):,}**")
+
+# --- STREAMLIT APP ---
+
+st.set_page_config(page_title="Stock FIFO Calculator", layout="centered", page_icon="💹")
+
+st.markdown("""
+<style>
+body {
+    background-color: #121212;
+    color: #e0e0e0;
+}
+.stButton>button {
+    background-color: #2196F3;
+    color: white;
+}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("Stock FIFO Selling Price Calculator")
+
+# Load and prepare data once
+df = load_and_clean_data()
+
+option = st.radio("Choose an option:", ["Portfolio View", "Selling Price Calculator"])
+
+if option == "Portfolio View":
+    display_portfolio(df)
+
+elif option == "Selling Price Calculator":
+    holdings = get_current_holdings(df)
+    if not holdings:
+        st.write("No stocks available for sale in your portfolio.")
+        st.stop()
+
+    stock = st.selectbox("Select Stock", sorted(holdings.keys()))
+    lots = get_fifo_lots(df, stock)
+    total_qty = sum(q for q, _ in lots)
+
+    qty_type = st.radio("Quantity to sell type:", ["Units", "Percent"])
+    if qty_type == "Units":
+        qty_to_sell = st.number_input(f"Enter quantity to sell (max {total_qty} units):", min_value=1, max_value=int(total_qty), step=1)
+    else:
+        pct = st.slider("Enter quantity to sell as % of holding:", min_value=1, max_value=100)
+        qty_to_sell = int((pct / 100) * total_qty)
+
+    profit_pct = st.number_input("Enter desired profit % on total shares sold:", min_value=0.0, step=0.1, format="%.2f")
+
+    if st.button("Calculate Selling Price"):
+        selling_price = calculate_selling_price(lots, qty_to_sell, profit_pct)
+        if selling_price is None:
+            st.error("Not enough shares available to sell this quantity.")
+        else:
+            st.success(f"Required Selling Price per share to achieve {profit_pct}% profit: ₹{selling_price:.2f}")
+
