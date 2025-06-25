@@ -77,17 +77,30 @@ uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multipl
 
 if uploaded_files:
     try:
+        # Load all files
         dfs = [load_and_clean_tradebook(f) for f in uploaded_files]
         combined_df = pd.concat(dfs, ignore_index=True)
         
+        # Get current holdings and stock list
         holdings = get_current_holdings(combined_df)
         available_stocks = holdings.index.tolist()
-        
+
         if not available_stocks:
-            st.warning("No stocks with positive holdings found in your portfolio.")
+            st.warning("No stocks currently held in portfolio.")
         else:
             stock = st.selectbox("Select Stock", available_stocks)
-            # Proceed with your calculations using 'stock'
+            
+            # Show inputs only after a stock is selected
+            qty_to_sell = st.number_input("Quantity to sell", min_value=1, max_value=int(holdings[stock]))
+            profit_percent = st.number_input("Desired Profit %", min_value=0.0, format="%.2f")
+            
+            if st.button("Calculate Selling Price"):
+                # Your FIFO calculation and display here
+                try:
+                    sell_price = calculate_selling_price(combined_df, stock, qty_to_sell, profit_percent)
+                    st.success(f"Selling price per share: ₹{sell_price:.2f}")
+                except Exception as e:
+                    st.error(f"Calculation error: {e}")
 
     except Exception as e:
         st.error(f"Failed to process CSV files: {e}")
